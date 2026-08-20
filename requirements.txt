@@ -1,0 +1,23 @@
+# SEMAI Analytics Intelligence Platform - Dependencies
+
+# Core
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Google APIs
+google-auth>=2.0.0
+google-auth-oauthlib>=1.0.0
+google-api-python-client>=2.0.0
+
+# Google Analytics 4 (optional - REST API fallback available)
+google-analytics-data>=0.18.0
+google-analytics-admin>=0.22.0
+
+# Gemini AI
+google-generativeai>=0.3.0
+python-dotenv>=1.0.0
+
+# Document generation
+python-docx>=0.8.11
+openpyxl>=3.1.0

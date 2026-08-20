@@ -1,0 +1,394 @@
+"""
+SEMAI Analytics Intelligence Platform - Report Generator.
+
+Pure-Python class that wraps all Gemini-powered report generation.
+No Streamlit dependency.
+"""
+
+from __future__ import annotations
+
+import json
+
+import numpy as np
+import pandas as pd
+
+from config import MODEL
+from prompts import (
+    ACTION_REPORT_PROMPT,
+    CLUSTER_AUDIT_PROMPT,
+    COMPARISON_PROMPT,
+    DEEP_AUDIT_PROMPT,
+    GA4_AUDIT_PROMPT,
+)
+
+
+class ReportGenerator:
+    """Generates AI-powered reports using the configured Gemini model.
+
+    All public methods accept structured data dictionaries and return
+    the generated markdown report as a string.
+
+    Raises:
+        RuntimeError: If the Gemini model is not configured.
+    """
+
+    def __init__(self, model=None):
+        """Initialise with an optional override *model*.
+
+        Args:
+            model: A ``google.generativeai.GenerativeModel`` instance.
+                   Defaults to the globally configured ``MODEL``.
+        """
+        self._model = model or MODEL
+        if self._model is None:
+            raise RuntimeError(
+                "Gemini model is not configured. "
+                "Ensure GEMINI_API_KEY is set."
+            )
+
+    # -----------------------------------------------------------------
+    # GSC Reports
+    # -----------------------------------------------------------------
+
+    def generate_deep_audit(self, payload: dict) -> str:
+        """Generate a Deep Audit Report from GSC data.
+
+        Args:
+            payload: Structured GSC payload from
+                     ``services.gsc.extract_payload``.
+
+        Returns:
+            Markdown report string.
+        """
+        prompt_text = f"""
+{DEEP_AUDIT_PROMPT}
+
+--- ACTUAL GSC DATA TO ANALYZE ---
+
+{json.dumps(payload, indent=2)}
+
+--- BEGIN ANALYSIS NOW ---
+
+Analyze the GSC data above and generate the complete executive report immediately.
+If the data shows "No GSC data returned" or has minimal metrics, provide the empty data guidance.
+Otherwise, generate all 9 sections of the Executive Addendum.
+
+START YOUR RESPONSE NOW:
+"""
+        return self._model.generate_content(prompt_text).text
+
+    def generate_cluster_audit(self, payload: dict) -> str:
+        """Generate a Cluster Audit Report from GSC data.
+
+        Args:
+            payload: Structured GSC payload.
+
+        Returns:
+            Markdown report string.
+        """
+        prompt_text = f"""
+{CLUSTER_AUDIT_PROMPT}
+
+--- FACTUAL GSC DATA ---
+
+This is the COMPLETE Google Search Console dataset.
+Do NOT hallucinate or infer missing data.
+
+{json.dumps(payload, indent=2)}
+
+--- TASK ---
+
+Generate the FULL Cluster Audit Report.
+Follow the OUTPUT FORMAT EXACTLY.
+Provide actionable, micro-level recommendations.
+
+BEGIN REPORT:
+"""
+        return self._model.generate_content(prompt_text).text
+
+    def generate_action_report(
+        self,
+        deep_audit_report: str,
+        payload: dict,
+    ) -> str:
+        """Generate a GSC Action Report from a completed Deep Audit.
+
+        Args:
+            deep_audit_report: The markdown Deep Audit report text.
+            payload: Raw GSC payload for cross-referencing.
+
+        Returns:
+            Markdown report string.
+        """
+        prompt_text = f"""
+{ACTION_REPORT_PROMPT}
+
+--- DEEP AUDIT REPORT (INPUT) ---
+
+Below is the completed Deep Audit Report. Use this as your primary data source
+to generate the GSC Action Report.
+
+{deep_audit_report}
+
+--- RAW GSC DATA (REFERENCE) ---
+
+Additional raw GSC data for cross-referencing:
+
+{json.dumps(payload, indent=2)}
+
+--- BEGIN GSC ACTION REPORT NOW ---
+
+Using the Deep Audit Report above and the raw GSC data, generate the complete
+GSC Action Report following the template structure EXACTLY.
+
+Focus on:
+1. Forensic diagnosis of failure modes (zero-click, CTR mismatch, missing pages)
+2. Specific page-level fixes with exact title rewrites
+3. Priority matrix (P0-P3) with ROI estimates
+4. 30/60/90 day execution plan
+
+START YOUR RESPONSE NOW:
+"""
+        return self._model.generate_content(prompt_text).text
+
+    def generate_comparison_report(
+        self,
+        payload1: dict,
+        payload2: dict,
+        comparison_metrics: dict,
+    ) -> str:
+        """Generate a Period Comparison Report.
+
+        Args:
+            payload1: First-period GSC payload.
+            payload2: Second-period GSC payload.
+            comparison_metrics: Pre-computed delta metrics from
+                ``services.gsc.calculate_comparison_metrics``.
+
+        Returns:
+            Markdown report string.
+        """
+        prompt_text = f"""
+{COMPARISON_PROMPT}
+
+--- PERIOD 1 DATA ---
+
+{json.dumps(payload1, indent=2)}
+
+--- PERIOD 2 DATA ---
+
+{json.dumps(payload2, indent=2)}
+
+--- CALCULATED COMPARISON METRICS ---
+
+{json.dumps(comparison_metrics, indent=2)}
+
+--- TASK ---
+
+Generate the FULL Period Comparison Report.
+Follow the OUTPUT FORMAT EXACTLY.
+Provide data-driven insights and actionable recommendations.
+
+BEGIN COMPARISON REPORT:
+"""
+        return self._model.generate_content(prompt_text).text
+
+    # -----------------------------------------------------------------
+    # GA4 Reports
+    # -----------------------------------------------------------------
+
+    def generate_ga4_deep_audit(self, payload: dict) -> str:
+        """Generate a GA4 Deep Audit Report.
+
+        Args:
+            payload: Structured GA4 payload from
+                     ``services.ga4.extract_ga4_payload``.
+
+        Returns:
+            Markdown report string.
+        """
+        prompt_text = f"""
+{GA4_AUDIT_PROMPT}
+
+--- ACTUAL GA4 DATA TO ANALYZE ---
+
+{json.dumps(payload, indent=2)}
+
+--- BEGIN ANALYSIS NOW ---
+
+Analyze the GA4 data above and generate the complete executive report immediately.
+If the data shows an error or has minimal metrics, provide the empty data guidance.
+Otherwise, generate all sections of the GA4 Deep Audit Report following the template structure.
+
+START YOUR RESPONSE NOW:
+"""
+        return self._model.generate_content(prompt_text).text
+
+    # -----------------------------------------------------------------
+    # File Upload Reports
+    # -----------------------------------------------------------------
+
+    def generate_file_deep_audit(
+        self,
+        df: pd.DataFrame,
+        file_list: list[str],
+    ) -> str:
+        """Generate a Deep Audit Report from uploaded file data.
+
+        Args:
+            df: Combined DataFrame from all uploaded files.
+            file_list: List of original file names.
+
+        Returns:
+            Markdown report string.
+        """
+        data_summary = {
+            "files_uploaded": file_list,
+            "total_files": len(file_list),
+            "total_rows": len(df),
+            "total_columns": len(df.columns),
+            "columns": list(df.columns),
+            "data_types": {
+                col: str(dtype) for col, dtype in df.dtypes.items()
+            },
+            "missing_values": {
+                col: int(df[col].isnull().sum()) for col in df.columns
+            },
+            "summary_statistics": df.describe().to_dict(),
+            "sample_data": df.head(20).to_dict("records"),
+        }
+
+        prompt_text = f"""
+{DEEP_AUDIT_PROMPT}
+
+--- UPLOADED FILE DATA ANALYSIS ---
+
+You are analyzing data from uploaded files (CSV/Excel).
+This is NOT Google Search Console data.
+Perform a comprehensive data quality and content audit.
+
+FILES UPLOADED:
+{json.dumps(data_summary["files_uploaded"], indent=2)}
+
+DATA STRUCTURE:
+- Total Rows: {data_summary["total_rows"]:,}
+- Total Columns: {data_summary["total_columns"]}
+- Columns: {", ".join(data_summary["columns"])}
+
+DATA SUMMARY:
+{json.dumps(data_summary, indent=2)}
+
+--- TASK ---
+
+Analyze this uploaded data and generate a comprehensive Deep Audit Report covering:
+
+1. **Data Quality Assessment**
+   - Completeness analysis
+   - Data type consistency
+   - Missing values analysis
+   - Duplicate detection
+   - Data integrity issues
+
+2. **Content Analysis**
+   - Key patterns and trends
+   - Statistical insights
+   - Data distribution analysis
+   - Outlier detection
+   - Correlations between columns
+
+3. **Actionable Recommendations**
+   - Data cleaning steps needed
+   - Data enrichment opportunities
+   - Quality improvement actions
+   - Next steps for optimization
+
+Provide specific, evidence-based insights based on the actual data provided.
+
+BEGIN REPORT:
+"""
+        return self._model.generate_content(prompt_text).text
+
+    def generate_file_cluster_audit(
+        self,
+        df: pd.DataFrame,
+        file_list: list[str],
+    ) -> str:
+        """Generate a Cluster Audit Report from uploaded file data.
+
+        Args:
+            df: Combined DataFrame from all uploaded files.
+            file_list: List of original file names.
+
+        Returns:
+            Markdown report string.
+        """
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        categorical_cols = df.select_dtypes(include=["object"]).columns.tolist()
+
+        data_summary = {
+            "files_uploaded": file_list,
+            "total_rows": len(df),
+            "numeric_columns": numeric_cols,
+            "categorical_columns": categorical_cols,
+            "numeric_summary": (
+                df[numeric_cols].describe().to_dict() if numeric_cols else {}
+            ),
+            "categorical_summary": {
+                col: df[col].value_counts().head(10).to_dict()
+                for col in categorical_cols[:5]
+            },
+            "sample_data": df.head(20).to_dict("records"),
+        }
+
+        prompt_text = f"""
+{CLUSTER_AUDIT_PROMPT}
+
+--- UPLOADED FILE DATA FOR CLUSTERING ---
+
+You are analyzing data from uploaded files (CSV/Excel) for clustering patterns.
+This is NOT Google Search Console data.
+Identify natural groupings, patterns, and segments in the data.
+
+FILES UPLOADED:
+{json.dumps(data_summary["files_uploaded"], indent=2)}
+
+DATA STRUCTURE:
+- Total Rows: {data_summary["total_rows"]:,}
+- Numeric Columns: {", ".join(numeric_cols) if numeric_cols else "None"}
+- Categorical Columns: {", ".join(categorical_cols[:5]) if categorical_cols else "None"}
+
+DATA SUMMARY:
+{json.dumps(data_summary, indent=2)}
+
+--- TASK ---
+
+Analyze this uploaded data and generate a Cluster Audit Report covering:
+
+1. **Cluster Identification**
+   - Natural groupings in the data
+   - Segment patterns
+   - Key differentiators between groups
+   - Cluster characteristics
+
+2. **Pattern Analysis**
+   - Trends within each cluster
+   - Relationships between variables
+   - Anomalies and outliers
+   - Distribution patterns
+
+3. **Strategic Insights**
+   - Cluster-specific recommendations
+   - Prioritization framework
+   - Action plan for each segment
+   - Optimization opportunities
+
+4. **Implementation Roadmap**
+   - 7-day action plan
+   - 30-day strategic plan
+   - Success metrics per cluster
+
+Provide specific, actionable insights based on the actual data patterns.
+
+BEGIN REPORT:
+"""
+        return self._model.generate_content(prompt_text).text

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local secrets and OAuth files
+.env
+api_key
+client_secret.json
+client_secret_*.json
+
+# Runtime tokens and local state
+tokens/
+
+# Streamlit local settings
+.streamlit/secrets.toml
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
