@@ -156,7 +156,8 @@ Use this flow when you want deployment without pushing tokens or credential file
 ### Notes for cloud token behavior
 - Streamlit Cloud filesystem is ephemeral.
 - This app supports `ENABLE_TOKEN_PERSISTENCE = "false"` to avoid file-based token issues.
-- In cloud mode, users authenticate via Google each session.
+- With `ENABLE_TOKEN_PERSISTENCE = "false"`, tokens are stored in memory during app uptime
+   and reset when the app restarts.
 
 ---
 

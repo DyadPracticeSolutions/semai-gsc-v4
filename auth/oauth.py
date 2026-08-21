@@ -9,6 +9,7 @@ import os
 import pickle
 import re
 import json
+from pathlib import Path
 
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
@@ -25,6 +26,11 @@ from config import (
 )
 
 
+# In-memory fallback store for deployments where file persistence is disabled.
+# This survives reruns while the app process is alive.
+_MEMORY_CREDENTIALS: dict[str, object] = {}
+
+
 # =============================================================================
 # Helpers
 # =============================================================================
@@ -39,6 +45,15 @@ def _ensure_tokens_dir() -> None:
 
 
 _ensure_tokens_dir()
+
+
+def get_persistence_mode() -> str:
+    """Return credential persistence mode.
+
+    Returns:
+        ``"disk"`` when token files are enabled, else ``"memory"``.
+    """
+    return "disk" if ENABLE_TOKEN_PERSISTENCE else "memory"
 
 
 def sanitize_filename(email: str) -> str:
@@ -78,6 +93,7 @@ def save_credentials(creds, email: str) -> None:
         email: The user's email address.
     """
     if not ENABLE_TOKEN_PERSISTENCE:
+        _MEMORY_CREDENTIALS[email] = creds
         return
 
     token_path = get_token_path(email)
@@ -95,7 +111,7 @@ def load_credentials(email: str):
         A Google ``Credentials`` object or ``None`` if unavailable.
     """
     if not ENABLE_TOKEN_PERSISTENCE:
-        return None
+        return _MEMORY_CREDENTIALS.get(email)
 
     token_path = get_token_path(email)
     if not os.path.exists(token_path):
@@ -122,8 +138,9 @@ def refresh_credentials(creds, email: str):
     try:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
-            if ENABLE_TOKEN_PERSISTENCE:
-                save_credentials(creds, email)
+            # Persist refreshed credentials in the active persistence mode
+            # (disk for VM/local, memory for ephemeral cloud deployments).
+            save_credentials(creds, email)
             return creds
         return creds
     except Exception:
@@ -140,6 +157,7 @@ def delete_user_credentials(email: str) -> None:
         email: The user's email address.
     """
     if not ENABLE_TOKEN_PERSISTENCE:
+        _MEMORY_CREDENTIALS.pop(email, None)
         return
 
     token_path = get_token_path(email)
@@ -158,7 +176,7 @@ def get_all_saved_users() -> list[str]:
         List of email strings.
     """
     if not ENABLE_TOKEN_PERSISTENCE:
-        return []
+        return sorted(_MEMORY_CREDENTIALS.keys())
 
     if not os.path.exists(TOKENS_DIR):
         return []
@@ -229,8 +247,23 @@ def build_flow() -> Flow:
             redirect_uri=REDIRECT_URI,
         )
 
-    return Flow.from_client_secrets_file(
-        "client_secret.json",
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI,
+    # Local/VM fallback: use client_secret.json or discover downloaded files
+    # such as client_secret_<client-id>.apps.googleusercontent.com.json.
+    candidates = [
+        Path("client_secret.json"),
+        *sorted(Path(".").glob("client_secret*.json")),
+    ]
+    secret_file = next((p for p in candidates if p.exists()), None)
+
+    if secret_file:
+        return Flow.from_client_secrets_file(
+            str(secret_file),
+            scopes=SCOPES,
+            redirect_uri=REDIRECT_URI,
+        )
+
+    raise ValueError(
+        "Google OAuth client configuration not found. "
+        "Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET "
+        "(recommended for Streamlit Cloud) or provide client_secret.json locally."
     )

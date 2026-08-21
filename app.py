@@ -27,6 +27,7 @@ from auth.oauth import (
     build_flow,
     delete_user_credentials,
     get_all_saved_users,
+    get_persistence_mode,
     get_user_email,
     load_credentials,
     refresh_credentials,
@@ -864,58 +865,62 @@ if not st.session_state.authenticated:
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if ENABLE_TOKEN_PERSISTENCE:
-            st.markdown("### 📧 Enter Your Gmail")
-            login_email = st.text_input(
-                "Gmail Address",
-                placeholder="your.email@gmail.com",
-                key="login_email_input",
-                label_visibility="collapsed",
+        persistence_mode = get_persistence_mode()
+        if persistence_mode == "memory":
+            st.info(
+                "Session tokens are in memory for this deployment. "
+                "They survive reruns while the app stays active and reset after restart."
+            )
+        else:
+            st.info(
+                "Session tokens are persisted on disk in this deployment."
             )
 
-            if st.button("🔓 Sign In", use_container_width=True, type="primary"):
-                if login_email:
-                    login_email = login_email.strip().lower()
-                    if login_email in [u.lower() for u in saved_users]:
-                        matched_user = next(
-                            (u for u in saved_users if u.lower() == login_email), None
-                        )
-                        if matched_user:
-                            creds = load_credentials(matched_user)
-                            if creds:
-                                if creds.valid:
-                                    st.session_state.creds = creds
+        st.markdown("### 📧 Enter Your Gmail")
+        login_email = st.text_input(
+            "Gmail Address",
+            placeholder="your.email@gmail.com",
+            key="login_email_input",
+            label_visibility="collapsed",
+        )
+
+        if st.button("🔓 Sign In", use_container_width=True, type="primary"):
+            if login_email:
+                login_email = login_email.strip().lower()
+                if login_email in [u.lower() for u in saved_users]:
+                    matched_user = next(
+                        (u for u in saved_users if u.lower() == login_email), None
+                    )
+                    if matched_user:
+                        creds = load_credentials(matched_user)
+                        if creds:
+                            if creds.valid:
+                                st.session_state.creds = creds
+                                st.session_state.current_user = matched_user
+                                st.session_state.authenticated = True
+                                st.rerun()
+                            elif creds.expired and creds.refresh_token:
+                                refreshed_creds = refresh_credentials(creds, matched_user)
+                                if refreshed_creds:
+                                    st.session_state.creds = refreshed_creds
                                     st.session_state.current_user = matched_user
                                     st.session_state.authenticated = True
                                     st.rerun()
-                                elif creds.expired and creds.refresh_token:
-                                    refreshed_creds = refresh_credentials(creds, matched_user)
-                                    if refreshed_creds:
-                                        st.session_state.creds = refreshed_creds
-                                        st.session_state.current_user = matched_user
-                                        st.session_state.authenticated = True
-                                        st.rerun()
-                                    else:
-                                        st.error("❌ Session expired. Please sign in with Google again.")
-                                        st.session_state.auth_error = "Session expired for this account."
                                 else:
                                     st.error("❌ Session expired. Please sign in with Google again.")
+                                    st.session_state.auth_error = "Session expired for this account."
                             else:
-                                st.error("❌ Failed to load credentials. Please sign in with Google.")
-                    else:
-                        st.warning("⚠️ No saved session found for this email. Please sign in with Google first.")
+                                st.error("❌ Session expired. Please sign in with Google again.")
+                        else:
+                            st.error("❌ Failed to load credentials. Please sign in with Google.")
                 else:
-                    st.warning("⚠️ Please enter your Gmail address.")
+                    st.warning("⚠️ No saved session found for this email. Please sign in with Google first.")
+            else:
+                st.warning("⚠️ Please enter your Gmail address.")
 
-            st.divider()
-            st.markdown("##### 🆕 First time? Sign in with Google")
-            login_button()
-        else:
-            st.info(
-                "Session token persistence is disabled in this deployment. "
-                "Use Google Sign-in each time."
-            )
-            login_button()
+        st.divider()
+        st.markdown("##### 🆕 First time? Sign in with Google")
+        login_button()
 
     st.stop()
 

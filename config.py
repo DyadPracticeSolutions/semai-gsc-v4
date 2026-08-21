@@ -44,7 +44,39 @@ SCOPES = [
     "openid",
 ]
 
-REDIRECT_URI = get_setting("REDIRECT_URI", "http://localhost:8501")
+
+def resolve_redirect_uri() -> str:
+    """Return the redirect URI for this runtime.
+
+    Prefer the configured value from environment/secrets. When the app is
+    running behind Streamlit Cloud or another proxy, derive the external host
+    from the request headers so the OAuth callback matches the live URL instead
+    of defaulting to localhost.
+    """
+    configured = get_setting("REDIRECT_URI")
+    if configured:
+        return configured.rstrip("/")
+
+    try:
+        import streamlit as st
+
+        if hasattr(st, "context") and getattr(st, "context", None) is not None:
+            headers = getattr(st.context, "headers", {}) or {}
+            host = headers.get("Host") or headers.get("host")
+            if host:
+                forwarded_proto = (
+                    headers.get("X-Forwarded-Proto")
+                    or headers.get("x-forwarded-proto")
+                    or "https"
+                )
+                return f"{forwarded_proto}://{host}".rstrip("/")
+    except Exception:
+        pass
+
+    return "http://localhost:8501"
+
+
+REDIRECT_URI = resolve_redirect_uri()
 
 TOKENS_DIR = get_setting("TOKENS_DIR", "tokens")
 ENABLE_TOKEN_PERSISTENCE = str(
